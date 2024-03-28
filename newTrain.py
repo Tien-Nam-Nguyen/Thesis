@@ -353,6 +353,7 @@ def main(args):
 
 
     if args.start_from and (not args.pretrain):
+        model.tspModel.fc2 = Model._build_fc(model.tspModel.feature_size, model.tspModel.temporal_region_num_classes)
         if args.start_from_mode == 'best':
             model_pth = torch.load(os.path.join(save_folder, 'model-best.pth'))
         elif args.start_from_mode == 'last':
