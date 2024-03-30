@@ -231,4 +231,3 @@ def evaluate(model, criterion, postprocessors, loader, dvc_json_path, logger=Non
     out_json.update(scores)
     save_dvc_json(out_json, dvc_json_path)
     return scores, loss_sum
-

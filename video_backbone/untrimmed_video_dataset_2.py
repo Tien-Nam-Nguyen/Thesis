@@ -351,4 +351,3 @@ class UntrimmedVideoDataset2(Dataset):
         
     #     return sample
 
-

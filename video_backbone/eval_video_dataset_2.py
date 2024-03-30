@@ -228,4 +228,3 @@ class EvalVideoDataset2(Dataset):
     #     sample['temporal-region-label'] = None
         
     #     return sample
-
