@@ -18,18 +18,18 @@ class NewModel(nn.Module):
         self.device = device
         self.transforms_train = transforms_train
         self.transforms_valid = transforms_valid
-        self.mha = nn.MultiheadAttention(768, 8, kdim=26 * 90, vdim=26 * 90, batch_first=True)
+        self.reduce_sound_clip_feature = nn.Linear(26 * 90, 768)
+        self.mha = nn.MultiheadAttention(768, 8, batch_first=True)
 
 
     def forward(self, x, alphas=None, eval_mode=False):
 
-        del x['video_gvf']
-        
         dt = x
         
         x = dt['video_segment']     # [(start, end), ...]
-        video_feature = []
-        sound_features = []
+        # video_feature = []
+        # sound_features = []
+        final_features = []
         T = len(x)
         filename = dt['video_filename']
         los = 0
@@ -38,10 +38,17 @@ class NewModel(nn.Module):
             clips, sound_feature = self.get_clips(x[:self.args.in_batch_size], filename, eval_mode)
             logits, clip_features = self.tspModel.forward(clips, gvf=None, return_features=True)     # (in_batch_size, 768)
             
-            video_feature.append(clip_features.detach())
-            sound_features.append(sound_feature.detach())
+            # video_feature.append(clip_features.detach())
+            # sound_features.append(sound_feature.detach())
+            reduced_sound_feature = self.reduce_sound_clip_feature(sound_feature)       # (in_batch_size, 768)
             x = x[self.args.in_batch_size:]
-            
+
+            final_feature = self.combine_tensors(sound_feature, reduced_sound_feature)      # (in_batch_size, 2, 768) sound_clip tren, vid_clip duoi
+            final_feature, _ = self.mha.forward(query=final_feature, key=final_feature, value=final_feature)        # (in_batch_size, 2, 768)
+            final_feature = final_feature[:, 0, :]      # (in_batch_size, 768)
+            final_features.append(final_feature)
+
+
             if not eval_mode:
                 middle_target = [dt[f'video_{col}'][:self.args.in_batch_size].view(1).to(self.device) for col in self.args.label_columns]
                 # middle_target = dt['video_action-label'][:self.args.in_batch_size].view(1).to(self.device)
@@ -56,13 +63,7 @@ class NewModel(nn.Module):
 
         
         
-        # dt['video_tensor'] = torch.vstack(video_feature).view(1, T, 768) 
-        dt['video_tensor'] = torch.vstack(video_feature).unsqueeze(0)       # (1, T. 768)
-        sound_features = torch.vstack(sound_features).unsqueeze(0).to(self.device)      # (1, T, 26 * 90)
-        final_feature, _ = self.mha.forward(query=dt['video_tensor'], key=sound_features, value=sound_features)     # (1, T, 768)
-        dt['video_tensor'] = final_feature
-
-
+        dt['video_tensor'] = torch.vstack(final_features)          # (T, 768)
         
         if not eval_mode:
             for param in self.tspModel.parameters():
@@ -72,6 +73,7 @@ class NewModel(nn.Module):
         del dt['video_action-label']
         del dt['video_segment']
         del dt['video_temporal-region-label']
+        del dt['video_gvf']
         
         output, loss = self.pdvcModel.forward(dt= dt, criterion= self.pdvcCriterion, transformer_input_type= self.args.transformer_input_type, eval_mode= eval_mode)
         
@@ -79,6 +81,12 @@ class NewModel(nn.Module):
         
 
     def get_clips(self, segments, filename, eval_mode):
+        '''
+            Lay ra video_frames va mfcc
+            segments: list of tuples (clip_t_start, clip_t_end)
+            filename: ten video file
+            eval_mode: True if dang validation
+        '''
         lst_vid = []
         lst_audio = []
 
@@ -101,3 +109,27 @@ class NewModel(nn.Module):
             lst_audio.append(mfcc_feature)
 
         return torch.stack(lst_vid).to(self.device), torch.stack(lst_audio)         # (in_batch_size, C, clip_length, H, W), (in_batch_size, 26 * 90)
+    
+
+    def combine_tensors(self, sound_clip_features, vid_clip_features):
+        '''
+            Ket hop hai tensor so le nhau
+            sound_clip_feature: (in_batch_size, 768)
+            sound_clip_feature: (in_batch_size, 768)
+
+            return: (in_batch_size, 2, 768)
+        '''
+
+        combined_tensor = []
+        ptr = 0
+        for i in range(vid_clip_features.shape(0) * 2):
+            tensor = None
+            if i % 2 == 0:
+                tensor = sound_clip_features[ptr]
+            else:
+                tensor = vid_clip_features[ptr]
+                ptr += 1
+            combined_tensor.append(tensor)
+
+        combined_tensor = torch.stack(combined_tensor)
+        return combined_tensor.reshape(-1, 2, 768)
