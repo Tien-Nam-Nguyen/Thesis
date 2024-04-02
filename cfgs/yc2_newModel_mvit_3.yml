@@ -30,8 +30,9 @@ optimizer_type: adamw
 epoch: 5
 pretrain_path: save/yc2_tsp_pdvc_mvit_3/model-best.pth
 pretrain: full
+save_checkpoint_every: 5
 
-root_dir: video_backbone/TSP/data/yc2
+root_dir: /content/drive/MyDrive/DVC/PDVC/video_backbone/TSP/data/yc2 # video_backbone/TSP/data/yc2
 workers: 2
 label_mapping_jsons: ['video_backbone/TSP/data/yc2/yc2_action_label_mapping.json', 'video_backbone/TSP/data/yc2/yc2_temporal_region_label_mapping.json']
 train_csv_filename: video_backbone/TSP/data/yc2/yc2_train_tsp_groundtruth.csv

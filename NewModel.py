@@ -47,10 +47,10 @@ class NewModel(nn.Module):
             reduced_sound_feature = self.reduce_sound_clip_feature(sound_feature)       # (in_batch_size, 768)
             x = x[self.args.in_batch_size:]
 
-            final_feature = self.combine_tensors(sound_feature, reduced_sound_feature)      # (in_batch_size, 2, 768) sound_clip tren, vid_clip duoi
+            final_feature = self.combine_tensors(reduced_sound_feature, clip_features)      # (in_batch_size, 2, 768) sound_clip tren, vid_clip duoi
             final_feature, _ = self.mha.forward(query=final_feature, key=final_feature, value=final_feature)        # (in_batch_size, 2, 768)
             final_feature = final_feature[:, 0, :]      # (in_batch_size, 768)
-            final_features.append(final_feature)
+            final_features.append(final_feature.detach())
 
 
             # if not eval_mode:
@@ -67,13 +67,13 @@ class NewModel(nn.Module):
 
         
         
-        dt['video_tensor'] = torch.vstack(final_features)          # (T, 768)
+        dt['video_tensor'] = torch.vstack(final_features).unsqueeze(0)          # (1, T, 768)
         
         if not eval_mode:
             for param in self.tspModel.parameters():
                 param.grad = None
                 
-
+        del dt['video_segment']
         
         output, loss = self.pdvcModel.forward(dt= dt, criterion= self.pdvcCriterion, transformer_input_type= self.args.transformer_input_type, eval_mode= eval_mode)
         

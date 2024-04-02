@@ -223,7 +223,7 @@ def main(args):
     data_loader_valid = DataLoader(
         dataset_valid, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True, collate_fn=collate_fn)
-
+     
     print('CREATING MODEL')
 
     model = NewModel(backbone=args.backbone_tsp, num_classes=[len(l) for l in label_mappings], num_heads=len(args.label_columns), concat_gvf=args.global_video_features is not None, 
@@ -352,7 +352,8 @@ def main(args):
     #     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     #     model_without_ddp = model.module
 
-
+    visited_videos = set()
+    first_start = False
     if args.start_from and (not args.pretrain):
         model.tspModel.fc2 = None
         model.tspModel.fc1 = None
@@ -367,6 +368,8 @@ def main(args):
         model.load_state_dict(model_pth['model'])
         optimizer.load_state_dict(model_pth['optimizer'])
         lr_scheduler.step(epoch-1)
+        visited_videos = model_pth['visited_videos']
+        first_start = True
         # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         # args.start_epoch = checkpoint['epoch'] + 1
 
@@ -417,6 +420,9 @@ def main(args):
         
         # Batch-level iteration
         for dt in tqdm(data_loader_train, disable=args.disable_tqdm):
+            if first_start and dt['video_filename'] in visited_videos:
+                continue
+            
             if args.device=='cuda':
                 torch.cuda.synchronize(args.device)
             if args.debug:
@@ -455,6 +461,21 @@ def main(args):
 
             if args.debug:
                 losses_log_every = 6
+            
+            visited_videos.add(dt['video_filename'])
+            saved_pth = {'epoch': epoch,
+                         'model': model.state_dict(),
+                         'optimizer': optimizer.state_dict(), 
+                         'visited_videos': visited_videos
+                        }
+
+            if args.save_all_checkpoint:
+                checkpoint_path = os.path.join(save_folder, 'model_iter_{}.pth'.format(iteration))
+            else:
+                checkpoint_path = os.path.join(save_folder, 'model-last.pth')
+
+            torch.save(saved_pth, checkpoint_path)
+
 
             if iteration % losses_log_every == 0:
                 end = time.time()
@@ -476,20 +497,23 @@ def main(args):
                 bad_video_num = 0
                 torch.cuda.empty_cache()
 
+        first_start = False
+        visited_videos = set()
         # evaluation
+        # if (epoch % args.save_checkpoint_every == 0) and (epoch >= args.min_epoch_when_save):
         if (epoch % args.save_checkpoint_every == 0) and (epoch >= args.min_epoch_when_save):
 
             # Save model
-            saved_pth = {'epoch': epoch,
-                         'model': model.state_dict(),
-                         'optimizer': optimizer.state_dict(), }
+            # saved_pth = {'epoch': epoch,
+            #              'model': model.state_dict(),
+            #              'optimizer': optimizer.state_dict(), }
 
-            if args.save_all_checkpoint:
-                checkpoint_path = os.path.join(save_folder, 'model_iter_{}.pth'.format(iteration))
-            else:
-                checkpoint_path = os.path.join(save_folder, 'model-last.pth')
+            # if args.save_all_checkpoint:
+            #     checkpoint_path = os.path.join(save_folder, 'model_iter_{}.pth'.format(iteration))
+            # else:
+            #     checkpoint_path = os.path.join(save_folder, 'model-last.pth')
 
-            torch.save(saved_pth, checkpoint_path)
+            # torch.save(saved_pth, checkpoint_path)
 
             model.eval()
             result_json_path = os.path.join(save_folder, 'prediction',
@@ -575,4 +599,3 @@ if __name__ == '__main__':
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True' # to avoid OMP problem on macos
     main(opt)
     # train(opt)
-
