@@ -47,7 +47,7 @@ class Model(nn.Module):
             logits = [self.fc(features)]
         else:
             if gvf is None and return_features:
-                return [self.fc1(features), self.fc2(features)], features
+                return [None], features
             
             
             if self.concat_gvf:

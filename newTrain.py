@@ -256,8 +256,8 @@ def main(args):
     else:
         params = [
             {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
-            {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
-            {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
+            # {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
+            # {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
         ]
 
 
@@ -271,12 +271,13 @@ def main(args):
         pretrained_state_dict_tsp['fc1.bias'] = state_dict['fc1.bias']
         pretrained_state_dict_tsp['fc2.bias'] = state_dict['fc2.bias']
         model.tspModel.load_state_dict(pretrained_state_dict_tsp)
-        model.tspModel.fc2 = Model._build_fc(model.tspModel.feature_size, model.tspModel.temporal_region_num_classes)
+        model.tspModel.fc2 = None
+        model.tspModel.fc1 = None
 
         params = [
             {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
-            {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
-            {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
+            # {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
+            # {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
         ]
 
         # optimizer = torch.optim.SGD(
@@ -353,7 +354,8 @@ def main(args):
 
 
     if args.start_from and (not args.pretrain):
-        model.tspModel.fc2 = Model._build_fc(model.tspModel.feature_size, model.tspModel.temporal_region_num_classes)
+        model.tspModel.fc2 = None
+        model.tspModel.fc1 = None
         if args.start_from_mode == 'best':
             model_pth = torch.load(os.path.join(save_folder, 'model-best.pth'))
         elif args.start_from_mode == 'last':
@@ -437,14 +439,14 @@ def main(args):
             _, loss, tsp_head_loss = model.forward(dt, args.loss_alphas, eval_mode=False)
 
             final_loss = sum(loss[k] * weight_dict[k] for k in loss.keys() if k in weight_dict)
-            (final_loss + 0.25 * tsp_head_loss).backward()
+            (final_loss).backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
             optimizer.step()
 
             for loss_k,loss_v in loss.items():
                 loss_sum[loss_k] = loss_sum.get(loss_k, 0)+ loss_v.item()
-            loss_sum['total_loss'] = loss_sum.get('total_loss', 0) + final_loss.item() + tsp_head_loss.item() * 0.25
+            loss_sum['total_loss'] = loss_sum.get('total_loss', 0) + final_loss.item()
 
             if args.device=='cuda':
                 torch.cuda.synchronize()
@@ -573,3 +575,4 @@ if __name__ == '__main__':
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True' # to avoid OMP problem on macos
     main(opt)
     # train(opt)
+

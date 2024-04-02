@@ -46,4 +46,4 @@ fc_lr: 0.00005
 pretrained_tsp_path: video_backbone/TSP/checkpoints/mvit_tsp.pth
 label_columns: ['action-label', 'temporal-region-label']
 metadata_csv_valid: video_backbone/TSP/data/yc2/yc2_valid_metadata.csv
-in_batch_size: 8
+in_batch_size: 4

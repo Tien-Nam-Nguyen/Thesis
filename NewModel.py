@@ -3,6 +3,7 @@ import torchaudio.transforms as transforms
 from torch import nn
 from pdvc.pdvc import build
 from TSPmodel import Model
+from video_backbone.untrimmed_video_dataset_2 import _resample_video_idx
 from torchvision.io import read_video
 
 class NewModel(nn.Module):
@@ -25,6 +26,9 @@ class NewModel(nn.Module):
     def forward(self, x, alphas=None, eval_mode=False):
 
         dt = x
+        del dt['video_action-label']
+        del dt['video_temporal-region-label']
+        del dt['video_gvf']
         
         x = dt['video_segment']     # [(start, end), ...]
         # video_feature = []
@@ -35,7 +39,7 @@ class NewModel(nn.Module):
         los = 0
         
         while(len(x) > 0):
-            clips, sound_feature = self.get_clips(x[:self.args.in_batch_size], filename, eval_mode)
+            clips, sound_feature = self.get_clips(x[:self.args.in_batch_size], filename, dt['video_fps'], eval_mode)
             logits, clip_features = self.tspModel.forward(clips, gvf=None, return_features=True)     # (in_batch_size, 768)
             
             # video_feature.append(clip_features.detach())
@@ -49,17 +53,17 @@ class NewModel(nn.Module):
             final_features.append(final_feature)
 
 
-            if not eval_mode:
-                middle_target = [dt[f'video_{col}'][:self.args.in_batch_size].view(1).to(self.device) for col in self.args.label_columns]
-                # middle_target = dt['video_action-label'][:self.args.in_batch_size].view(1).to(self.device)
+            # if not eval_mode:
+            #     middle_target = [dt[f'video_{col}'][:self.args.in_batch_size].view(1).to(self.device) for col in self.args.label_columns]
+            #     # middle_target = dt['video_action-label'][:self.args.in_batch_size].view(1).to(self.device)
 
-                for outpt, target, alpha in zip(logits, middle_target, alphas):
-                    head_loss = self.tspCriterion(outpt, target)
-                    los += alpha * head_loss
+            #     for outpt, target, alpha in zip(logits, middle_target, alphas):
+            #         head_loss = self.tspCriterion(outpt, target)
+            #         los += alpha * head_loss
 
-                # remove in_batch_size label
-                for col in self.args.label_columns:
-                    dt[f'video_{col}'] = dt[f'video_{col}'][self.args.in_batch_size:]
+            #     # remove in_batch_size label
+            #     for col in self.args.label_columns:
+            #         dt[f'video_{col}'] = dt[f'video_{col}'][self.args.in_batch_size:]
 
         
         
@@ -70,17 +74,13 @@ class NewModel(nn.Module):
                 param.grad = None
                 
 
-        del dt['video_action-label']
-        del dt['video_segment']
-        del dt['video_temporal-region-label']
-        del dt['video_gvf']
         
         output, loss = self.pdvcModel.forward(dt= dt, criterion= self.pdvcCriterion, transformer_input_type= self.args.transformer_input_type, eval_mode= eval_mode)
         
         return output, loss, los
         
 
-    def get_clips(self, segments, filename, eval_mode):
+    def get_clips(self, segments, filename, fps, eval_mode):
         '''
             Lay ra video_frames va mfcc
             segments: list of tuples (clip_t_start, clip_t_end)
@@ -97,6 +97,8 @@ class NewModel(nn.Module):
             transform = transforms.MFCC(sample_rate=sr, n_mfcc=13, melkwargs={'n_fft': 2048, 'hop_length': 512, 'n_mels': 128, 'center': False})
             mfcc_feature = transform(sound_tensor.to(self.device))      # (2, 13, x)
             mfcc_feature = mfcc_feature.reshape(26 * 90)
+            idxs = _resample_video_idx(self.args.clip_len, fps, self.args.frame_rate)
+            vframes = vframes[idxs][:self.args.clip_len]
 
             
             if eval_mode:

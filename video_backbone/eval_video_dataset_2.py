@@ -82,6 +82,7 @@ class EvalVideoDataset2(Dataset):
         sample['action-label'] = None
         sample['gvf'] = None 
         sample['temporal-region-label'] = None
+        sample['fps'] = fps
 
         return sample
 

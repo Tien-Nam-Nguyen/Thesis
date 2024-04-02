@@ -127,7 +127,7 @@ class NewDataset(Dataset):
         # event_seq_idx = seq_gt_idx = np.expand_dims(gt_idx, 0)
         # lnt_scores = [1.] * len(lnt_featstamps)
 
-        return vid_sample['segment'], gt_featstamps, action_labels, caption_label, gt_timestamps, duration, captions, key, vid_sample['gvf'], vid_sample['action-label'], vid_sample['filename'], vid_sample['temporal-region-label']
+        return vid_sample['segment'], gt_featstamps, action_labels, caption_label, gt_timestamps, duration, captions, key, vid_sample['gvf'], vid_sample['action-label'], vid_sample['filename'], vid_sample['temporal-region-label'], vid_sample['fps']
     
 
 
@@ -148,7 +148,7 @@ def collate_fn(batch):      # 1 clip: [(start, end), ...]
     # width = batch[0][0][0].shape[3]
     # channel = batch[0][0][0].shape[0]
 
-    list_of_list_segment, gt_timestamps_list, labels, caption_list, gt_raw_timestamp, raw_duration, raw_caption, key, gvfs, action_labels, filenames, temporal_region_labels = zip(*batch)
+    list_of_list_segment, gt_timestamps_list, labels, caption_list, gt_raw_timestamp, raw_duration, raw_caption, key, gvfs, action_labels, filenames, temporal_region_labels, fpss = zip(*batch)
 
     # actions_labels: [[]]
     # temporal_region_labels: [[]]
@@ -257,7 +257,8 @@ def collate_fn(batch):      # 1 clip: [(start, end), ...]
                 "gvf": gvf_tensor,
                 "action-label": action_label_tensor,
                 "filename": filenames[0],            # 0 because its batch size is 1
-                "temporal-region-label": temporal_region_label_tensor 
+                "temporal-region-label": temporal_region_label_tensor,
+                "fps": fpss[0]
             },
         
 
