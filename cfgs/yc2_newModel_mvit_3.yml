@@ -31,6 +31,7 @@ epoch: 5
 pretrain_path: save/yc2_tsp_pdvc_mvit_3/model-best.pth
 pretrain: full
 save_checkpoint_every: 5
+start_from_mode: last
 
 root_dir: /content/drive/MyDrive/DVC/PDVC/video_backbone/TSP/data/yc2 # video_backbone/TSP/data/yc2
 workers: 2

@@ -89,18 +89,18 @@ def main(args):
     if args.start_from:
         args.pretrain = False
         infos_path = os.path.join(save_folder, 'info.json')
-        with open(infos_path) as f:
-            logger.info('Load info from {}'.format(infos_path))
-            saved_info = json.load(f)
-            prev_opt = saved_info[args.start_from_mode[:4]]['opt']
+        # with open(infos_path) as f:
+        #     logger.info('Load info from {}'.format(infos_path))
+        #     saved_info = json.load(f)
+        #     prev_opt = saved_info[args.start_from_mode[:4]]['opt']
 
-            exclude_opt = ['start_from', 'start_from_mode', 'pretrain']
-            for opt_name in prev_opt.keys():
-                if opt_name not in exclude_opt:
-                    vars(args).update({opt_name: prev_opt.get(opt_name)})
-                if prev_opt.get(opt_name) != vars(args).get(opt_name):
-                    logger.info('Change opt {} : {} --> {}'.format(opt_name, prev_opt.get(opt_name),
-                                                                   vars(args).get(opt_name)))
+        #     exclude_opt = ['start_from', 'start_from_mode', 'pretrain']
+        #     for opt_name in prev_opt.keys():
+        #         if opt_name not in exclude_opt:
+        #             vars(args).update({opt_name: prev_opt.get(opt_name)})
+        #         if prev_opt.get(opt_name) != vars(args).get(opt_name):
+        #             logger.info('Change opt {} : {} --> {}'.format(opt_name, prev_opt.get(opt_name),
+        #                                                           vars(args).get(opt_name)))
                     
     
     epoch = saved_info[args.start_from_mode[:4]].get('epoch', 0)
@@ -328,23 +328,7 @@ def main(args):
     #     params, momentum=args.momentum, weight_decay=args.weight_decay
     # )
     
-    optimizer = None
-    if args.optimizer_type == 'adam':
-        optimizer = optim.Adam(params=params, amsgrad=True, weight_decay=args.weight_decay)
-
-    elif args.optimizer_type == 'adamw':
-        optimizer = optim.AdamW(params=params, amsgrad=True, weight_decay=args.weight_decay)
-        
-    # convert scheduler to be per iteration, not per epoch, for warmup that lasts
-    # between different epochs
-    # warmup_iters = args.lr_warmup_epochs * len(data_loader_train)
-    # lr_milestones = [len(data_loader_train) * m for m in args.lr_milestones]
-    # lr_scheduler = WarmupMultiStepLR(
-    #     optimizer, milestones=lr_milestones, gamma=args.lr_gamma,
-    #     warmup_iters=warmup_iters, warmup_factor=1e-5)
-
-    milestone = [args.learning_rate_decay_start + args.learning_rate_decay_every * _ for _ in range(int((args.epoch - args.learning_rate_decay_start) / args.learning_rate_decay_every))]
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestone, gamma=args.learning_rate_decay_rate)
+    
     
     
     # model_without_ddp = model
@@ -358,22 +342,41 @@ def main(args):
         model.tspModel.fc2 = None
         model.tspModel.fc1 = None
         if args.start_from_mode == 'best':
-            model_pth = torch.load(os.path.join(save_folder, 'model-best.pth'))
+            model_pth = torch.load(os.path.join(save_folder, 'model-best.pth'), map_location=device)
         elif args.start_from_mode == 'last':
-            model_pth = torch.load(os.path.join(save_folder, 'model-last.pth'))
+            model_pth = torch.load(os.path.join(save_folder, 'model-last.pth'), map_location=device)
         logger.info('Loading pth from {}, iteration:{}'.format(save_folder, iteration))
         # model.pdvcModel.load_state_dict(model_pth['model'])
         print(f'Resuming from checkpoint.')
         # checkpoint = torch.load(args., map_location='cpu')
         model.load_state_dict(model_pth['model'])
-        optimizer.load_state_dict(model_pth['optimizer'])
-        lr_scheduler.step(epoch-1)
         visited_videos = model_pth['visited_videos']
+        epoch = model_pth['epoch']
         first_start = True
-        # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-        # args.start_epoch = checkpoint['epoch'] + 1
+        params = [
+            {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
+            {'params': model.pdvcModel.parameters(), 'lr': args.lr, 'name': 'decoder'},
+        ]
+        
 
-    
+    optimizer = None
+    if args.optimizer_type == 'adam':
+        optimizer = optim.Adam(params=params, amsgrad=True, weight_decay=args.weight_decay, lr=args.lr)
+
+    elif args.optimizer_type == 'adamw':
+        optimizer = optim.AdamW(params=params, amsgrad=True, weight_decay=args.weight_decay, lr=args.lr)
+        
+
+    milestone = [args.learning_rate_decay_start + args.learning_rate_decay_every * _ for _ in range(int((args.epoch - args.learning_rate_decay_start) / args.learning_rate_decay_every))]
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestone, gamma=args.learning_rate_decay_rate)
+
+    if args.start_from and (not args.pretrain):
+        optimizer.load_state_dict(model_pth['optimizer'])
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.cuda()
+        lr_scheduler.step(epoch-1)
 
     model.to(device)
     
@@ -419,6 +422,7 @@ def main(args):
 
         
         # Batch-level iteration
+        cao = 0
         for dt in tqdm(data_loader_train, disable=args.disable_tqdm):
             if first_start and dt['video_filename'] in visited_videos:
                 continue
@@ -463,18 +467,22 @@ def main(args):
                 losses_log_every = 6
             
             visited_videos.add(dt['video_filename'])
-            saved_pth = {'epoch': epoch,
-                         'model': model.state_dict(),
-                         'optimizer': optimizer.state_dict(), 
-                         'visited_videos': visited_videos
-                        }
-
-            if args.save_all_checkpoint:
-                checkpoint_path = os.path.join(save_folder, 'model_iter_{}.pth'.format(iteration))
-            else:
-                checkpoint_path = os.path.join(save_folder, 'model-last.pth')
-
-            torch.save(saved_pth, checkpoint_path)
+            if cao % 5 == 0:
+                saved_pth = {'epoch': epoch,
+                             'model': model.state_dict(),
+                             'optimizer': optimizer.state_dict(), 
+                             'visited_videos': visited_videos
+                            }
+    
+                if args.save_all_checkpoint:
+                    checkpoint_path = os.path.join(save_folder, 'model_iter_{}.pth'.format(iteration))
+                else:
+                    checkpoint_path = os.path.join(save_folder, 'model-last.pth')
+    
+                torch.save(saved_pth, checkpoint_path)
+                torch.cuda.empty_cache()
+        
+            cao += 1
 
 
             if iteration % losses_log_every == 0:
@@ -499,6 +507,7 @@ def main(args):
 
         first_start = False
         visited_videos = set()
+        cao = 0
         # evaluation
         # if (epoch % args.save_checkpoint_every == 0) and (epoch >= args.min_epoch_when_save):
         if (epoch % args.save_checkpoint_every == 0) and (epoch >= args.min_epoch_when_save):
@@ -599,3 +608,4 @@ if __name__ == '__main__':
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True' # to avoid OMP problem on macos
     main(opt)
     # train(opt)
+

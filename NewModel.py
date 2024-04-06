@@ -50,7 +50,7 @@ class NewModel(nn.Module):
             final_feature = self.combine_tensors(reduced_sound_feature, clip_features)      # (in_batch_size, 2, 768) sound_clip tren, vid_clip duoi
             final_feature, _ = self.mha.forward(query=final_feature, key=final_feature, value=final_feature)        # (in_batch_size, 2, 768)
             final_feature = final_feature[:, 0, :]      # (in_batch_size, 768)
-            final_features.append(final_feature.detach())
+            final_features.append(final_feature.detach().cpu())
 
 
             # if not eval_mode:
@@ -67,7 +67,7 @@ class NewModel(nn.Module):
 
         
         
-        dt['video_tensor'] = torch.vstack(final_features).unsqueeze(0)          # (1, T, 768)
+        dt['video_tensor'] = torch.vstack(final_features).to(self.device).unsqueeze(0)          # (1, T, 768)
         
         if not eval_mode:
             for param in self.tspModel.parameters():
