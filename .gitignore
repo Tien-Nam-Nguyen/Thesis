@@ -14,6 +14,7 @@ video_backbone/TSP/checkpoints/*.pth
 video_backbone/TSP/data/activitynet/valid/*
 video_backbone/TSP/data/activitynet/train/*
 read_npy.py
+test_npy.py
 
 
 *.Ink
