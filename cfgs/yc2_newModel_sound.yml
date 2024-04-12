@@ -1,0 +1,52 @@
+id: yc2_newModel_sound
+base_cfg_path: cfgs/anet_c3d_pdvc.yml       # qua file này xem thêm
+visual_feature_type: ['tsp_mvit']
+visual_feature_folder: ['data/yc2/features/tsp_mvitv2']
+invalid_video_json: ['data/yc2/features/invalidVids.json']
+gt_file_for_eval: ['data/yc2/captiondata/yc2_val.json']
+gt_file_for_para_eval: ['data/yc2/captiondata/para/para_yc2_val.json']
+feature_dim: 768    # số chiều có được từ mvitv2 out ra 
+num_queries: 100    # là hệ số N, có tên là event queries, biểu thị số sự kiện mà decoder muốn "hỏi" (lấy) từ đám visual feature
+max_eseq_length: 20     # giới hạn số sự kiện lớn nhất mà có thể đếm
+train_proposal_sample_num: 30   # khỏi
+frame_embedding_num: 200    # số chiều thời gian đệm thêm để cho vừa shape của encoder (frame_embedding_num, số_chiều_đặc trưng)
+caption_decoder_type: standard  # dùng loại lstm thứ hai trong pdvc
+dict_file: data/yc2/vocabulary_youcook2.json
+val_caption_file: data/yc2/captiondata/yc2_val.json
+train_caption_file: data/yc2/captiondata/yc2_train.json
+vocab_size: 1607    # số từ duy nhất (từ điển)
+dec_layers: 3       # số layer lớp deformable transformer decoder
+enc_layers: 3       # y chang
+batch_size: 1
+lr: 0.00001     # learning rate
+learning_rate_decay_start: 2        # bắt đầu từ epoch này thì băt đầu giảm lr
+learning_rate_decay_every: 2        # giảm lr sau mỗi 
+learning_rate_decay_rate: 0.5       # giảm lr một nửa 
+weight_decay: 0.0001                # l2 weight decay
+drop_prob: 0.5              # tỉ lệ dropout trong lstm
+transformer_dropout_prob: 0.1
+max_caption_len: 30         # chiều dài câu lớn nhất có thể sinh
+optimizer_type: adamw
+epoch: 6
+pretrain_path: save/yc2_tsp_pdvc_mvit_3/model-best.pth
+pretrain: full
+save_checkpoint_every: 5
+
+
+root_dir: video_backbone/TSP/data/yc2 # video_backbone/TSP/data/yc2
+workers: 1
+label_mapping_jsons: ['video_backbone/TSP/data/yc2/yc2_action_label_mapping.json', 'video_backbone/TSP/data/yc2/yc2_temporal_region_label_mapping.json']
+train_csv_filename: video_backbone/TSP/data/yc2/yc2_train_tsp_groundtruth.csv
+valid_csv_filename: video_backbone/TSP/data/yc2/yc2_valid_tsp_groundtruth.csv
+train_subdir: sound_train
+valid_subdir: valid
+loss_alphas: [1.0, 1.0]
+global_video_features: video_backbone/TSP/extract_features/youcook_r2plus1d_34-tac_on_kinetics.h5
+backbone_tsp: mvit_v2_s
+backbone_lr: 0.00001
+fc_lr: 0.00005
+pretrained_tsp_path: video_backbone/TSP/checkpoints/mvit_tsp.pth
+label_columns: ['action-label', 'temporal-region-label']
+metadata_csv_valid: video_backbone/TSP/data/yc2/yc2_valid_metadata.csv
+in_batch_size: 64
+sound_lr: 0.0001

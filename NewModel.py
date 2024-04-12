@@ -1,4 +1,6 @@
 import torch
+import numpy as np
+import math
 import os
 import torchaudio.transforms as transforms
 import torchaudio
@@ -13,16 +15,17 @@ class NewModel(nn.Module):
     def __init__(self, backbone, num_classes, num_heads, args, concat_gvf, device, transforms_train=None, transforms_valid=None):
 
         super(NewModel, self).__init__()
-        self.tspModel = Model(backbone=backbone, num_classes=num_classes, num_heads=num_heads, concat_gvf=concat_gvf)
+        # self.tspModel = Model(backbone=backbone, num_classes=num_classes, num_heads=num_heads, concat_gvf=concat_gvf)
         self.pdvcModel, self.pdvcCriterion, self.pdvcPostprocessor = build(args)
-        self.feature_size = self.tspModel.feature_size
+        # self.feature_size = self.tspModel.feature_size
         self.args = args
-        self.tspCriterion = nn.CrossEntropyLoss(ignore_index=-1)
+        # self.tspCriterion = nn.CrossEntropyLoss(ignore_index=-1)
         self.device = device
         self.transforms_train = transforms_train
         self.transforms_valid = transforms_valid
-        self.reduce_sound_clip_feature = nn.Linear(26 * 90, 768)
-        self.mha = nn.MultiheadAttention(768, 8, batch_first=True)
+        self.reduce_sound_clip_feature1 = nn.Linear(26 * 180, 1024)
+        self.reduce_sound_clip_feature2 = nn.Linear(1024, 768)
+        self.mha = nn.MultiheadAttention(768, 32, batch_first=True)
 
 
     def forward(self, x, alphas=None, eval_mode=False):
@@ -35,49 +38,38 @@ class NewModel(nn.Module):
         x = dt['video_segment']     # [(start, end), ...]
         # video_feature = []
         # sound_features = []
+        in_batch_size = self.args.in_batch_size
+        if eval_mode:
+            in_batch_size = self.args.in_batch_size_valid
+            
         final_features = []
         T = len(x)
         filename = dt['video_filename']
         los = 0
-        lst_features = self.get_vid_features(filename)      # [(in_batch_size, 768)]
-        
-        while(len(x) > 0):
-            # clips, sound_feature = self.get_clips(x[:self.args.in_batch_size], filename, dt['video_fps'], eval_mode)
-            clips = lst_features[0].to(self.device)   # (in_batch_size, 768)
-            sound_feature = self.get_mfcc(x[:self.args.in_batch_size], filename)
-            logits, clip_features = self.tspModel.forward(clips, gvf=None, return_features=True)     # (in_batch_size, 768)
-            
-            # video_feature.append(clip_features.detach())
-            # sound_features.append(sound_feature.detach())
-            reduced_sound_feature = self.reduce_sound_clip_feature(sound_feature)       # (in_batch_size, 768)
-            x = x[self.args.in_batch_size:]
-            del lst_features[0]
-
-            final_feature = self.combine_tensors(reduced_sound_feature, clip_features)      # (in_batch_size, 2, 768) sound_clip tren, vid_clip duoi
-            final_feature, _ = self.mha.forward(query=final_feature, key=final_feature, value=final_feature)        # (in_batch_size, 2, 768)
-            final_feature = final_feature[:, 0, :]      # (in_batch_size, 768)
-            final_features.append(final_feature.detach().cpu())
-
-
-            # if not eval_mode:
-            #     middle_target = [dt[f'video_{col}'][:self.args.in_batch_size].view(1).to(self.device) for col in self.args.label_columns]
-            #     # middle_target = dt['video_action-label'][:self.args.in_batch_size].view(1).to(self.device)
-
-            #     for outpt, target, alpha in zip(logits, middle_target, alphas):
-            #         head_loss = self.tspCriterion(outpt, target)
-            #         los += alpha * head_loss
-
-            #     # remove in_batch_size label
-            #     for col in self.args.label_columns:
-            #         dt[f'video_{col}'] = dt[f'video_{col}'][self.args.in_batch_size:]
-
+        clips = self.get_vid_features(filename).to(self.device)      # (T, 768)
         
         
-        dt['video_tensor'] = torch.vstack(final_features).to(self.device).unsqueeze(0)          # (1, T, 768)
+        sound_feature = self.get_mfcc(x, filename).to(self.device)
+        # logits, clip_features = self.tspModel.forward(clips, gvf=None, return_features=True)     # (in_batch_size, 768)
         
-        if not eval_mode:
-            for param in self.tspModel.parameters():
-                param.grad = None
+        # video_feature.append(clip_features.detach())
+        # sound_features.append(sound_feature.detach())
+        reduced_sound_feature = self.reduce_sound_clip_feature1(sound_feature)       # (T, 1024)
+        reduced_sound_feature = self.reduce_sound_clip_feature2(reduced_sound_feature)  # (T, 768)
+        # x = x[in_batch_size:]
+        # del lst_features[0]
+
+        final_feature = self.combine_tensors(reduced_sound_feature, clips)      # (T, 2, 768) sound_clip tren, vid_clip duoi
+        final_feature, _ = self.mha.forward(query=final_feature, key=final_feature, value=final_feature)        # (T, 2, 768)
+        final_feature = final_feature[:, 0, :]      # (T, 768)
+       
+        
+        
+        dt['video_tensor'] = final_feature.unsqueeze(0)          # (1, T, 768)
+        
+        # if not eval_mode:
+        #     for param in self.tspModel.parameters():
+        #         param.grad = None
                 
         del dt['video_segment']
         
@@ -100,7 +92,7 @@ class NewModel(nn.Module):
             # get a tensor [clip_length, H, W, C] of the video frames between clip_t_start and clip_t_end seconds
             vframes, sound_tensor, info = read_video(filename=filename, start_pts=clip_t_start, end_pts=clip_t_end, pts_unit='sec')
             sr = info['audio_fps']
-            transform = transforms.MFCC(sample_rate=sr, n_mfcc=13, melkwargs={'n_fft': 2048, 'hop_length': 512, 'n_mels': 128, 'center': False})
+            transform = transforms.MFCC(sample_rate=sr, n_mfcc=13, melkwargs={'n_fft': 1024, 'hop_length': 256, 'n_mels': 128, 'center': False})
             mfcc_feature = transform(sound_tensor.to(self.device))      # (2, 13, x)
             mfcc_feature = mfcc_feature.reshape(26 * 90)
             idxs = _resample_video_idx(self.args.clip_len, fps, self.args.frame_rate)
@@ -130,7 +122,7 @@ class NewModel(nn.Module):
 
         combined_tensor = []
         ptr = 0
-        for i in range(vid_clip_features.shape(0) * 2):
+        for i in range(vid_clip_features.shape[0] * 2):
             tensor = None
             if i % 2 == 0:
                 tensor = sound_clip_features[ptr]
@@ -151,27 +143,35 @@ class NewModel(nn.Module):
             eval_mode: True if dang validation
         '''
         lst_audio = []
+        try:
+            waveform, sr = torchaudio.load(filename)
+        except:
+            return torch.zeros((len(segments), 26 * 180))
 
         for clip_t_start, clip_t_end in segments:
-            # get a tensor [clip_length, H, W, C] of the video frames between clip_t_start and clip_t_end seconds
-            sr = torchaudio.info(filename).sample_rate
-            waveform, sr = torchaudio.load(filename, frame_offset=clip_t_start * sr, num_frames=(clip_t_end - clip_t_start) * sr)
-            transform = transforms.MFCC(sample_rate=sr, n_mfcc=13, melkwargs={'n_fft': 2048, 'hop_length': 512, 'n_mels': 128, 'center': False})
-            mfcc_feature = transform(waveform)      # (2, 13, x)
-            mfcc_feature = mfcc_feature.reshape(26 * 90)
+            
+            start_sample = math.floor(clip_t_start * sr)
+            end_sample = math.floor(clip_t_end * sr)
+            cut_waveform = waveform[:, start_sample:end_sample]
+            
+            transform = transforms.MFCC(sample_rate=sr, n_mfcc=13, melkwargs={'n_fft': 1024, 'hop_length': 256, 'n_mels': 64, 'center': False})
+            mfcc_feature = transform(cut_waveform)      # (2, 13, 180)
+            # print(f'avni {mfcc_feature.shape}')
+            if mfcc_feature.shape[2] != 180:
+                print(f'shape error: {filename} {clip_t_start}')
+                pad = torch.zeros((2, 13, 180 - mfcc_feature.shape[2]))
+                mfcc_feature = torch.cat([mfcc_feature, pad], dim=-1)
+                
+            mfcc_feature = mfcc_feature.reshape(26 * 180)
             
             lst_audio.append(mfcc_feature)
 
-        return torch.stack(lst_audio)         # (in_batch_size, 26 * 90)
+        return torch.stack(lst_audio)         # (T, 26 * 180)
     
 
     def get_vid_features(self, filename):
-        filename = os.path.join('/content/drive/MyDrive/DVC/DVC/data/yc2/features/tsp_mvit_newModel', filename[-15:-4] + '.npy')
-        vid_features = torch.load(filename)     # (T, 768)
-        lst = []
+        filename = os.path.join('data/yc2/features/tsp_mvitv2', filename[-17:-4] + '.npy')
+        vid_features = np.load(filename)
+        vid_features = torch.from_numpy(vid_features)     # (T, 768)
 
-        for i in range(0, vid_features.shape[0], self.args.in_batch_size):
-            ele = vid_features[i: i + self.args.in_batch_size, :]
-            lst.append(ele)
-
-        return lst
+        return vid_features     # (T, 768)

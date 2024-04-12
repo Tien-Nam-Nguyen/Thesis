@@ -89,18 +89,18 @@ def main(args):
     if args.start_from:
         args.pretrain = False
         infos_path = os.path.join(save_folder, 'info.json')
-        # with open(infos_path) as f:
-        #     logger.info('Load info from {}'.format(infos_path))
-        #     saved_info = json.load(f)
-        #     prev_opt = saved_info[args.start_from_mode[:4]]['opt']
+        with open(infos_path) as f:
+            logger.info('Load info from {}'.format(infos_path))
+            saved_info = json.load(f)
+            prev_opt = saved_info[args.start_from_mode[:4]]['opt']
 
-        #     exclude_opt = ['start_from', 'start_from_mode', 'pretrain']
-        #     for opt_name in prev_opt.keys():
-        #         if opt_name not in exclude_opt:
-        #             vars(args).update({opt_name: prev_opt.get(opt_name)})
-        #         if prev_opt.get(opt_name) != vars(args).get(opt_name):
-        #             logger.info('Change opt {} : {} --> {}'.format(opt_name, prev_opt.get(opt_name),
-        #                                                           vars(args).get(opt_name)))
+            exclude_opt = ['start_from', 'start_from_mode', 'pretrain']
+            for opt_name in prev_opt.keys():
+                if opt_name not in exclude_opt:
+                    vars(args).update({opt_name: prev_opt.get(opt_name)})
+                if prev_opt.get(opt_name) != vars(args).get(opt_name):
+                    logger.info('Change opt {} : {} --> {}'.format(opt_name, prev_opt.get(opt_name),
+                                                                  vars(args).get(opt_name)))
                     
     
     epoch = saved_info[args.start_from_mode[:4]].get('epoch', 0)
@@ -254,31 +254,32 @@ def main(args):
         ]
 
     else:
-        params = [
-            {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
-            # {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
-            # {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
-        ]
+        params = []
+        # params = [
+        #     {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
+        #     # {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
+        #     # {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
+        # ]
 
 
     if args.pretrained_tsp_path and (not args.start_from):
         print(f'Load a model from tsp pretrained weights')
-        pretrained_state_dict_tsp = torch.load(args.pretrained_tsp_path, map_location='cpu')['model']
-        pretrained_state_dict_tsp = {k: v for k,v in pretrained_state_dict_tsp.items() if 'fc' not in k}
-        state_dict = model.tspModel.state_dict()
-        pretrained_state_dict_tsp['fc1.weight'] = state_dict['fc1.weight']
-        pretrained_state_dict_tsp['fc2.weight'] = state_dict['fc2.weight']
-        pretrained_state_dict_tsp['fc1.bias'] = state_dict['fc1.bias']
-        pretrained_state_dict_tsp['fc2.bias'] = state_dict['fc2.bias']
-        model.tspModel.load_state_dict(pretrained_state_dict_tsp)
-        model.tspModel.fc2 = None
-        model.tspModel.fc1 = None
+        # pretrained_state_dict_tsp = torch.load(args.pretrained_tsp_path, map_location='cpu')['model']
+        # pretrained_state_dict_tsp = {k: v for k,v in pretrained_state_dict_tsp.items() if 'fc' not in k}
+        # state_dict = model.tspModel.state_dict()
+        # pretrained_state_dict_tsp['fc1.weight'] = state_dict['fc1.weight']
+        # pretrained_state_dict_tsp['fc2.weight'] = state_dict['fc2.weight']
+        # pretrained_state_dict_tsp['fc1.bias'] = state_dict['fc1.bias']
+        # pretrained_state_dict_tsp['fc2.bias'] = state_dict['fc2.bias']
+        # model.tspModel.load_state_dict(pretrained_state_dict_tsp)
+        # model.tspModel.fc2 = None
+        # model.tspModel.fc1 = None
 
-        params = [
-            {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
-            # {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
-            # {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
-        ]
+        # params = [
+        #     {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
+        #     # {'params': model.tspModel.fc1.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc1'},
+        #     # {'params': model.tspModel.fc2.parameters(), 'lr': args.fc_lr * args.world_size, 'name': 'fc2'}
+        # ]
 
         # optimizer = torch.optim.SGD(
         #     params, momentum=args.momentum, weight_decay=args.weight_decay
@@ -320,9 +321,12 @@ def main(args):
         else:
             raise ValueError("wrong value of args.pretrain")
 
-        params.append(
+        params = [
                 {'params': model.pdvcModel.parameters(), 'lr': args.lr, 'name': 'decoder'},
-        )
+                {'params': model.reduce_sound_clip_feature1.parameters(), 'lr': args.sound_lr, 'name': 'sound_reduce1'},
+                {'params': model.reduce_sound_clip_feature2.parameters(), 'lr': args.sound_lr, 'name': 'sound_reduce2'},
+                {'params': model.mha.parameters(), 'lr': args.sound_lr, 'name': 'sound_mha'},
+        ]
 
     # optimizer = torch.optim.SGD(
     #     params, momentum=args.momentum, weight_decay=args.weight_decay
@@ -339,8 +343,8 @@ def main(args):
     visited_videos = set()
     first_start = False
     if args.start_from and (not args.pretrain):
-        model.tspModel.fc2 = None
-        model.tspModel.fc1 = None
+        # model.tspModel.fc2 = None
+        # model.tspModel.fc1 = None
         if args.start_from_mode == 'best':
             model_pth = torch.load(os.path.join(save_folder, 'model-best.pth'), map_location=device)
         elif args.start_from_mode == 'last':
@@ -354,11 +358,13 @@ def main(args):
         epoch = model_pth['epoch']
         first_start = True
         params = [
-            {'params': model.tspModel.features.parameters(), 'lr': args.backbone_lr * args.world_size, 'name': 'backbone'},
             {'params': model.pdvcModel.parameters(), 'lr': args.lr, 'name': 'decoder'},
+            {'params': model.reduce_sound_clip_feature1.parameters(), 'lr': args.sound_lr, 'name': 'sound_reduce1'},
+            {'params': model.reduce_sound_clip_feature2.parameters(), 'lr': args.sound_lr, 'name': 'sound_reduce2'},
+            {'params': model.mha.parameters(), 'lr': args.sound_lr, 'name': 'sound_mha'}
         ]
         
-
+    model.to(device)
     optimizer = None
     if args.optimizer_type == 'adam':
         optimizer = optim.Adam(params=params, amsgrad=True, weight_decay=args.weight_decay, lr=args.lr)
@@ -424,7 +430,7 @@ def main(args):
         # Batch-level iteration
         cao = 0
         for dt in tqdm(data_loader_train, disable=args.disable_tqdm):
-            if first_start and dt['video_filename'] in visited_videos:
+            if first_start and dt['video_filename'][-17:] in visited_videos:
                 continue
             
             if args.device=='cuda':
@@ -466,8 +472,8 @@ def main(args):
             if args.debug:
                 losses_log_every = 6
             
-            visited_videos.add(dt['video_filename'])
-            if cao % 5 == 0:
+            visited_videos.add(dt['video_filename'][-17:])
+            if cao % 100 == 0:
                 saved_pth = {'epoch': epoch,
                              'model': model.state_dict(),
                              'optimizer': optimizer.state_dict(), 
@@ -480,8 +486,8 @@ def main(args):
                     checkpoint_path = os.path.join(save_folder, 'model-last.pth')
     
                 torch.save(saved_pth, checkpoint_path)
-                torch.cuda.empty_cache()
-        
+                
+            torch.cuda.empty_cache()
             cao += 1
 
 
@@ -505,22 +511,23 @@ def main(args):
                 bad_video_num = 0
                 torch.cuda.empty_cache()
 
+        # xong 1 epoch
         first_start = False
         visited_videos = set()
         cao = 0
         # evaluation
         # if (epoch % args.save_checkpoint_every == 0) and (epoch >= args.min_epoch_when_save):
-        if (epoch % args.save_checkpoint_every == 0) and (epoch >= args.min_epoch_when_save):
+        if epoch >= args.min_epoch_when_save:
 
             # Save model
-            # saved_pth = {'epoch': epoch,
-            #              'model': model.state_dict(),
-            #              'optimizer': optimizer.state_dict(), }
+            saved_pth = {'epoch': epoch,
+                         'model': model.state_dict(),
+                         'optimizer': optimizer.state_dict(), 'visited_videos': visited_videos}
 
-            # if args.save_all_checkpoint:
-            #     checkpoint_path = os.path.join(save_folder, 'model_iter_{}.pth'.format(iteration))
-            # else:
-            #     checkpoint_path = os.path.join(save_folder, 'model-last.pth')
+            if args.save_all_checkpoint:
+                checkpoint_path = os.path.join(save_folder, 'model_iter_{}.pth'.format(iteration))
+            else:
+                checkpoint_path = os.path.join(save_folder, 'model-last.pth')
 
             # torch.save(saved_pth, checkpoint_path)
 
@@ -608,4 +615,3 @@ if __name__ == '__main__':
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True' # to avoid OMP problem on macos
     main(opt)
     # train(opt)
-
